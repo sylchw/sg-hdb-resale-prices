@@ -13,12 +13,16 @@ def load_resale_data():
     current_year = pd.Timestamp.now().year
     data['remaining_lease'] = (data['lease_commence_date'] + 99) - current_year
 
-    # Group by month to calculate the mean resale price
-    mean_price_per_month = data.groupby(data['month'].dt.to_period('M')).agg(
-        mean_resale_price=('resale_price', 'mean')
+    # Group by month to calculate the median resale price
+    median_price_per_month = data.groupby(data['month'].dt.to_period('M')).agg(
+        median_resale_price=('resale_price', 'median')
     ).reset_index()
     
     # Convert period back to timestamp for easier handling
-    mean_price_per_month['month'] = mean_price_per_month['month'].dt.to_timestamp()
+    median_price_per_month['month'] = median_price_per_month['month'].dt.to_timestamp()
 
-    return data, mean_price_per_month
+    # Calculate YoY growth (%)
+    median_price_per_month['yoy_growth'] = median_price_per_month['median_resale_price'].pct_change(periods=12) * 100
+
+    return data, median_price_per_month
+
