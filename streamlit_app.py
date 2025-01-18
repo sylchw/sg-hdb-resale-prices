@@ -259,21 +259,37 @@ try:
 
                     while iteration_count < max_iterations:
                         iteration_count += 1
-                        affordability_result = calculate_affordability(
-                            is_couple=affordability_input["is_couple"],
-                            citizen_status=affordability_input["citizen_status"],
-                            annual_income=required_income,
-                            spouse_income=0,  # Assuming single-income affordability
-                            cpf_oa=0,
-                            spouse_cpf_oa=0,
-                            personal_cash=0,
-                            spouse_cash=0,
-                            proximity_option=affordability_input["proximity_option"],
-                            loan_tenure=loan_tenure,
-                            flat_size="",
-                            loan_interest_rate=loan_interest_rate,
-                            loan_type_input=loan_type_input
-                        )
+                        try:
+                            affordability_result = calculate_affordability(
+                                is_couple=affordability_input["is_couple"],
+                                citizen_status=affordability_input["citizen_status"],
+                                annual_income=required_income,
+                                spouse_income=0,  # Assuming single-income affordability
+                                cpf_oa=0,
+                                spouse_cpf_oa=0,
+                                personal_cash=0,
+                                spouse_cash=0,
+                                proximity_option=affordability_input["proximity_option"],
+                                loan_tenure=loan_tenure,
+                                flat_size="",
+                                loan_interest_rate=loan_interest_rate,
+                                loan_type_input=loan_type_input
+                            )
+                        except ValueError:
+                            # Handle HDB loan restriction or other calculation errors
+                            required_income_data.append({
+                                "Town": town,
+                                "Month": row["month"].strftime("%Y-%m"),
+                                "Block": row["block"],
+                                "Street Name": row["street_name"],
+                                "Flat Type": row["flat_type"],
+                                "Storey Range": row["storey_range"],
+                                "Resale Price (SGD)": min_price,
+                                "Remaining Lease": row["remaining_lease"],
+                                "Required Annual Income (SGD)": "HDB Loan Restricted"
+                            })
+                            found = True
+                            break
 
                         # Check if the total affordability meets the minimum price
                         total_affordability = float(affordability_result["Total Affordability"].replace("SGD ", "").replace(",", ""))
@@ -283,7 +299,7 @@ try:
 
                         required_income += step
 
-                    if found:
+                    if found and required_income != 0:
                         required_income_data.append({
                             "Town": town,
                             "Month": row["month"].strftime("%Y-%m"),
@@ -295,8 +311,18 @@ try:
                             "Remaining Lease": row["remaining_lease"],
                             "Required Annual Income (SGD)": required_income
                         })
-                    else:
-                        st.warning(f"Could not determine required income for town {town}. Try adjusting parameters or filters.")
+                    elif not found:
+                        required_income_data.append({
+                            "Town": town,
+                            "Month": row["month"].strftime("%Y-%m"),
+                            "Block": row["block"],
+                            "Street Name": row["street_name"],
+                            "Flat Type": row["flat_type"],
+                            "Storey Range": row["storey_range"],
+                            "Resale Price (SGD)": min_price,
+                            "Remaining Lease": row["remaining_lease"],
+                            "Required Annual Income (SGD)": "No House Available"
+                        })
 
                 # Convert results to DataFrame and display
                 required_income_df = pd.DataFrame(required_income_data)
@@ -306,7 +332,6 @@ try:
                 st.warning(f"An error occurred while calculating minimum income: {e}")
         else:
             st.warning("Please calculate affordability and ensure filters are applied to see the required combined annual income for each town.")
-
 
     else:
         st.warning("Please fill in the required inputs to calculate affordability.")
