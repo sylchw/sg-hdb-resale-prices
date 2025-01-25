@@ -67,7 +67,9 @@ try:
         # Update affordability input with the selected interest rate
         affordability_input.update({
             "loan_interest_rate": loan_interest_rate,
-            "loan_tenure": affordability_input.get("loan_tenure", 25)  # Default tenure if not provided
+            "loan_tenure": affordability_input.get("loan_tenure", 25), # Default tenure if not provided
+            "monthly_debt": affordability_input["monthly_debt"],
+            "spouse_monthly_debt": affordability_input["spouse_monthly_debt"]  
         })
 
         # Calculate affordability
@@ -84,7 +86,9 @@ try:
             loan_tenure=affordability_input["loan_tenure"],
             flat_size=affordability_input["flat_size"],
             loan_interest_rate=affordability_input["loan_interest_rate"],
-            loan_type_input=loan_type_input.split(' ')[0]
+            loan_type_input=loan_type_input.split(' ')[0],
+            monthly_debt=affordability_input["monthly_debt"],
+            spouse_monthly_debt=affordability_input["spouse_monthly_debt"]
         )
 
 
@@ -108,12 +112,34 @@ try:
         income_range = np.arange(20000, 180001, 5000)  # From 20,000 to 180,000 in steps of 5,000
         affordability_values = []
 
+        # Extract debt obligations
+        monthly_debt = affordability_input["monthly_debt"]
+        spouse_monthly_debt = affordability_input["spouse_monthly_debt"]
+
         for income in income_range:
             updated_input = affordability_input.copy()
             updated_input["annual_income"] = income
             updated_input["spouse_income"] = affordability_input["spouse_income"]  # Keep spouse income constant
+            updated_input["monthly_debt"] = monthly_debt
+            updated_input["spouse_monthly_debt"] = spouse_monthly_debt
 
-            # Calculate HDB Loan Affordability
+            # Bank Loan Affordability
+            updated_input["loan_type_input"] = "Bank"
+            try:
+                bank_result = calculate_affordability(**updated_input)
+                bank_affordability = {
+                    "Income": income,
+                    "Affordability": float(bank_result["Total Affordability"].replace("SGD ", "").replace(",", "")),
+                    "Grants": float(bank_result["Total Grants Available"].replace("SGD ", "").replace(",", "")),
+                    "Loan Available": float(bank_result["Maximum Loan Eligibility"].replace("SGD ", "").replace(",", "")),
+                    "Monthly Repayment": float(bank_result["Monthly Repayment"].replace("SGD ", "").replace(",", "")),
+                    "Loan Type": "Bank Loan",
+                }
+                affordability_values.append(bank_affordability)
+            except ValueError:
+                pass  # Handle case where calculation fails due to debt impact
+
+            # HDB Loan Affordability
             updated_input["loan_type_input"] = "HDB"
             updated_input["loan_interest_rate"] = 0.026  # Fixed HDB interest rate
             try:
@@ -129,20 +155,6 @@ try:
                 affordability_values.append(hdb_affordability)
             except ValueError:
                 pass  # Skip HDB calculations for incomes above the threshold
-
-            # Calculate Bank Loan Affordability
-            updated_input["loan_type_input"] = "Bank"
-            updated_input["loan_interest_rate"] = 0.03  # Example Bank interest rate
-            bank_result = calculate_affordability(**updated_input)
-            bank_affordability = {
-                "Income": income,
-                "Affordability": float(bank_result["Total Affordability"].replace("SGD ", "").replace(",", "")),
-                "Grants": float(bank_result["Total Grants Available"].replace("SGD ", "").replace(",", "")),
-                "Loan Available": float(bank_result["Maximum Loan Eligibility"].replace("SGD ", "").replace(",", "")),
-                "Monthly Repayment": float(bank_result["Monthly Repayment"].replace("SGD ", "").replace(",", "")),
-                "Loan Type": "Bank Loan",
-            }
-            affordability_values.append(bank_affordability)
 
         # Convert to DataFrame for Altair
         affordability_df = pd.DataFrame(affordability_values)
@@ -185,6 +197,7 @@ try:
 
         # Display the chart
         st.altair_chart(chart, use_container_width=True)
+
 
 
         # Best possible house in each town within the last 3 months

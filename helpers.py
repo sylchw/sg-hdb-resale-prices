@@ -2,7 +2,6 @@ import pandas as pd
 import numpy_financial as npf
 from data_loader import load_ehg_data
 
-
 def calculate_grants(st):
     """Handles user input and calculates grant amounts."""
     with st.form("affordability_form"):
@@ -12,12 +11,15 @@ def calculate_grants(st):
             "Couple Composition:",
             ["2 Singapore Citizens (SC)", "1 SC and 1 Singapore Permanent Resident (SPR)", "SC and Non-Resident Spouse"]
         )
-        annual_income = st.number_input("Your Annual Income (SGD):", min_value=0, value=50000)
+        annual_income = st.number_input("Your Annual Income (SGD):", min_value=0, value=60000)
         spouse_income = st.number_input("Spouse's Annual Income (SGD):", min_value=0) if is_couple == "Couple" else 0
         cpf_oa = st.number_input("Your CPF OA Balance (SGD):", min_value=0)
         spouse_cpf_oa = st.number_input("Spouse's CPF OA Balance (SGD):", min_value=0) if is_couple == "Couple" else 0
         personal_cash = st.number_input("Your Personal Cash Savings (SGD):", min_value=0)
         spouse_cash = st.number_input("Spouse's Cash Savings (SGD):", min_value=0) if is_couple == "Couple" else 0
+        monthly_debt = st.number_input("Total of your other MONTHLY debt obligations, e.g. Car, Education, Personal Loan, etc:", min_value=0)
+        spouse_monthly_debt = st.number_input("Total of your spouse's other MONTHLY debt obligations, e.g. Car, Education, Personal Loan, etc:", min_value=0) \
+            if is_couple == "Couple" else 0
         proximity_option = st.radio(
             "Proximity to Parents/Children:",
             ["Not Applicable", "Live with", "Live near (within 4km)"]
@@ -62,10 +64,11 @@ def calculate_grants(st):
             "loan_tenure": loan_tenure,
             "flat_size": flat_size,
             "loan_type_input": loan_type_input,
-            "loan_interest_rate": loan_interest_rate
+            "loan_interest_rate": loan_interest_rate,
+            "monthly_debt": monthly_debt,
+            "spouse_monthly_debt": spouse_monthly_debt
         }
     return None
-
 
 def calculate_affordability(
     is_couple,
@@ -80,7 +83,9 @@ def calculate_affordability(
     loan_tenure,
     flat_size,
     loan_interest_rate,
-    loan_type_input
+    loan_type_input,
+    monthly_debt,
+    spouse_monthly_debt
 ):
     """
     Calculate affordability based on user inputs.
@@ -98,6 +103,8 @@ def calculate_affordability(
         flat_size: The size of the flat being purchased.
         loan_interest_rate: Selected loan interest rate (HDB Loan or Bank Loan).
         loan_type_input: The type of loan selected by the user ("HDB" or "Bank").
+        monthly_debt: Other monthly debt obligations of the buyer.
+        spouse_monthly_debt: Other monthly debt obligations of the spouse.
     Returns:
         A dictionary with calculated affordability components.
     """
@@ -146,24 +153,32 @@ def calculate_affordability(
     elif proximity_option == "Live near (within 4km)":
         phg = 20000 if citizen_status in ["2 Singapore Citizens (SC)", "1 SC and 1 Singapore Permanent Resident (SPR)"] else 10000
 
+    # Total debt obligations
+    total_monthly_debt = monthly_debt + (spouse_monthly_debt if is_couple == "Couple" else 0)
+
+    # # Calculate the remaining TDSR allowance
+    # tdsr_cap = monthly_income * 0.55
+    # remaining_tdsr_allowance = max(tdsr_cap - total_monthly_debt, 0)
+
+    # import streamlit as st
+    # st.write(loan_type_input, monthly_income)
+
     # Determine loan type and calculate maximum loan eligibility based on user input
     if loan_type_input == "HDB":
         if total_income > LOAN_THRESHOLD:
             raise ValueError("HDB loans are not allowed for income above SGD 168,000.")
-        max_loan = calculate_hdb_loan(monthly_income, loan_tenure, 0.026)  # Fixed HDB rate
+        max_loan = calculate_hdb_loan(monthly_income, total_monthly_debt, loan_tenure, 0.026)  # Fixed HDB rate
     elif loan_type_input == "Bank":
-        max_loan = calculate_bank_loan(monthly_income, loan_tenure, loan_interest_rate)
+        max_loan = calculate_bank_loan(monthly_income, total_monthly_debt, loan_tenure, loan_interest_rate)
     else:
         raise ValueError("Invalid loan type. Please select either 'HDB' or 'Bank'.")
 
-    # Ensure loan calculations do not cause unexpected spikes
-    max_loan = max(max_loan, 0)  # Avoid negative or unexpected values
+    # Apply 30% gross income cap for loan eligibility
+    repayment_cap = monthly_income * 0.30
+    max_loan = min(max_loan, calculate_loan_from_repayment(repayment_cap, loan_tenure, loan_interest_rate))
 
     # Calculate monthly repayment based on loan type
-    if loan_type_input == "HDB":
-        monthly_repayment = calculate_monthly_repayment(max_loan, loan_tenure, 0.026)  # Fixed HDB rate
-    else:
-        monthly_repayment = calculate_monthly_repayment(max_loan, loan_tenure, loan_interest_rate)
+    monthly_repayment = calculate_monthly_repayment(max_loan, loan_tenure, loan_interest_rate)
 
     # Total affordability calculation
     total_grants = ehg_amount + family_grant + phg
@@ -182,12 +197,17 @@ def calculate_affordability(
         "Total Affordability": f"SGD {total_affordability:,.0f}"
     }
 
-def calculate_hdb_loan(monthly_income, loan_tenure_years, interest_rate):
+
+def calculate_hdb_loan(monthly_income, total_monthly_debt, loan_tenure_years, interest_rate):
     """
     Calculate the maximum HDB loan amount based on MSR (30% of gross monthly income).
     """
     # HDB's Mortgage Servicing Ratio (MSR) is 30% of gross monthly income
     msr_limit = 0.30 * monthly_income
+
+    # Check TDSR
+    remaining_debt_limit = max(0, 0.55 * monthly_income - total_monthly_debt)
+    msr_limit = min(remaining_debt_limit, msr_limit)
 
     # Monthly interest rate
     monthly_interest_rate = interest_rate / 12
@@ -203,12 +223,16 @@ def calculate_hdb_loan(monthly_income, loan_tenure_years, interest_rate):
 
     return max_loan
 
-def calculate_bank_loan(monthly_income, loan_tenure_years, interest_rate):
+def calculate_bank_loan(monthly_income, total_monthly_debt, loan_tenure_years, interest_rate):
     """
     Calculate the maximum bank loan amount based on TDSR (55% of gross monthly income).
     """
-    # Banks' Total Debt Servicing Ratio (TDSR) is 55% of gross monthly income
-    tdsr_limit = 0.55 * monthly_income
+    # HDB's Mortgage Servicing Ratio (MSR) is 30% of gross monthly income
+    msr_limit = 0.30 * monthly_income
+
+    # Check TDSR
+    remaining_debt_limit = max(0, 0.55 * monthly_income - total_monthly_debt)
+    msr_limit = min(remaining_debt_limit, msr_limit)
 
     # Monthly interest rate
     monthly_interest_rate = interest_rate / 12
@@ -218,9 +242,23 @@ def calculate_bank_loan(monthly_income, loan_tenure_years, interest_rate):
 
     # Calculate maximum loan amount based on TDSR
     if monthly_interest_rate > 0:
-        max_loan = (tdsr_limit * (1 - (1 + monthly_interest_rate) ** -num_payments)) / monthly_interest_rate
+        max_loan = (msr_limit * (1 - (1 + monthly_interest_rate) ** -num_payments)) / monthly_interest_rate
     else:
-        max_loan = tdsr_limit * num_payments
+        max_loan = msr_limit * num_payments
+
+    return max_loan
+
+def calculate_loan_from_repayment(repayment_cap, loan_tenure, interest_rate):
+    """
+    Calculate the maximum loan amount based on a repayment cap.
+    """
+    monthly_interest_rate = interest_rate / 12
+    num_payments = loan_tenure * 12
+
+    if monthly_interest_rate > 0:
+        max_loan = (repayment_cap * (1 - (1 + monthly_interest_rate) ** -num_payments)) / monthly_interest_rate
+    else:
+        max_loan = repayment_cap * num_payments
 
     return max_loan
 
@@ -236,8 +274,3 @@ def calculate_monthly_repayment(loan_amount, loan_tenure, interest_rate):
     else:
         monthly_repayment = loan_amount / num_payments
     return monthly_repayment
-
-
-
-
-
