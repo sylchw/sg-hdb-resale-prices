@@ -108,7 +108,7 @@ try:
         st.table(styled_df)
 
         # Generate Affordability Plot
-        st.subheader("Affordability Plot")
+        st.subheader("Affordability Plot (aka. How much you need to earn per month for your entered debt and savings)")
         income_range = np.arange(20000, 180001, 5000)  # From 20,000 to 180,000 in steps of 5,000
         affordability_values = []
 
@@ -119,7 +119,8 @@ try:
         for income in income_range:
             updated_input = affordability_input.copy()
             updated_input["annual_income"] = income
-            updated_input["spouse_income"] = affordability_input["spouse_income"]  # Keep spouse income constant
+            updated_input["spouse_income"] = 0 # Enter spouse income as 0 for HHI calculations
+            # affordability_input["spouse_income"]  # Keep spouse income constant
             updated_input["monthly_debt"] = monthly_debt
             updated_input["spouse_monthly_debt"] = spouse_monthly_debt
 
@@ -190,7 +191,7 @@ try:
 
         # Combine line and points
         chart = (line + points).properties(
-            title="Affordability vs Income for HDB and Bank Loans",
+            title="Affordability (Max House Purchase Price) vs Household Income for HDB and Bank Loans",
             width='container',
             height=400
         ).interactive()
@@ -263,20 +264,19 @@ try:
                     town = row["town"]
                     min_price = row["resale_price"]
 
-                    # Iteratively find the minimum income that satisfies the affordability condition
-                    required_income = 0
-                    step = 500  # Increment step for income in SGD
-                    max_iterations = 5000  # Safeguard against infinite loops
-                    iteration_count = 0
+                    # Binary search to find the minimum required income
+                    low, high = 0, 2000000  # Reasonable upper limit for annual income in SGD
+                    required_income = -1
                     found = False
 
-                    while iteration_count < max_iterations:
-                        iteration_count += 1
+                    while low <= high:
+                        mid = (low + high) // 2  # Take the middle point
+
                         try:
                             affordability_result = calculate_affordability(
                                 is_couple=affordability_input["is_couple"],
                                 citizen_status=affordability_input["citizen_status"],
-                                annual_income=required_income,
+                                annual_income=mid,
                                 spouse_income=0,  # Assuming single-income affordability
                                 cpf_oa=0,
                                 spouse_cpf_oa=0,
@@ -286,7 +286,9 @@ try:
                                 loan_tenure=loan_tenure,
                                 flat_size="",
                                 loan_interest_rate=loan_interest_rate,
-                                loan_type_input=loan_type_input
+                                loan_type_input=loan_type_input,
+                                monthly_debt=affordability_input["monthly_debt"],
+                                spouse_monthly_debt=affordability_input["spouse_monthly_debt"]
                             )
                         except ValueError:
                             # Handle HDB loan restriction or other calculation errors
@@ -304,15 +306,15 @@ try:
                             found = True
                             break
 
-                        # Check if the total affordability meets the minimum price
                         total_affordability = float(affordability_result["Total Affordability"].replace("SGD ", "").replace(",", ""))
+
                         if total_affordability >= min_price:
-                            found = True
-                            break
+                            required_income = mid
+                            high = mid - 500  # Look for lower possible income
+                        else:
+                            low = mid + 500  # Increase income requirement
 
-                        required_income += step
-
-                    if found and required_income != 0:
+                    if required_income != -1:
                         required_income_data.append({
                             "Town": town,
                             "Month": row["month"].strftime("%Y-%m"),
@@ -324,7 +326,7 @@ try:
                             "Remaining Lease": row["remaining_lease"],
                             "Required Annual Income (SGD)": required_income
                         })
-                    elif not found:
+                    else:
                         required_income_data.append({
                             "Town": town,
                             "Month": row["month"].strftime("%Y-%m"),
@@ -336,6 +338,7 @@ try:
                             "Remaining Lease": row["remaining_lease"],
                             "Required Annual Income (SGD)": "No House Available"
                         })
+
 
                 # Convert results to DataFrame and display
                 required_income_df = pd.DataFrame(required_income_data)
