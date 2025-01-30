@@ -1,4 +1,38 @@
 import pandas as pd
+import os
+
+def create_resale_data():
+    # Define the folder where the CSV files are stored
+    data_folder = "./data/govsgdata"
+
+    # List all CSV files in the data folder
+    csv_files = [
+        os.path.join(data_folder, file)
+        for file in os.listdir(data_folder)
+        if file.endswith(".csv")
+    ]
+
+    # Initialize an empty list to store DataFrames
+    data_frames = []
+
+    # Read and preprocess each file
+    for file in csv_files:
+        # Load CSV file into a DataFrame
+        df = pd.read_csv(file)
+        
+        # Ensure consistent column naming and data types across files
+        # Rename columns if necessary to ensure consistency
+        df.columns = df.columns.str.lower().str.replace(" ", "_")  # Standardize column names
+        
+        # Append the DataFrame to the list
+        data_frames.append(df)
+
+    # Concatenate all DataFrames into a single DataFrame
+    combined_data = pd.concat(data_frames, ignore_index=True)
+
+    # Save the combined DataFrame to a single CSV file
+    output_file = "./data/combined_resale_data.csv"
+    combined_data.to_csv(output_file, index=False)
 
 def load_resale_data():
     """Load and preprocess resale flat price data."""

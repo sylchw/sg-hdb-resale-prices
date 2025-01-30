@@ -16,8 +16,6 @@ if "affordability_input" not in st.session_state:
 if "loan_type_input" not in st.session_state:
     st.session_state["loan_type_input"] = "HDB Loan (2.6%)"  # Default to HDB Loan
 
-
-
 # Set the title and favicon
 st.set_page_config(
     page_title="Resale HDB Dashboard",
@@ -202,7 +200,7 @@ try:
 
 
         # Best possible house in each town within the last 3 months
-        st.subheader("Best Possible House You Can Buy in Each Town (Last 3 Months)")
+        st.subheader("Median Price of each town with amount your household must be able to earn to afford it (Last 3 Months)")
 
         if affordability_result:
             # Extract total affordability
@@ -220,17 +218,30 @@ try:
             ].copy()
 
             # Sort by town, date, and resale price
-            affordable_houses = affordable_houses.sort_values(by=["town", "month", "resale_price"], ascending=[True, False, False])
+            affordable_houses = affordable_houses.sort_values(by=["town", "month", "resale_price"], ascending=[True, False, True])
 
-            # Select the most expensive affordable house in each town
-            best_houses = affordable_houses.groupby("town").first().reset_index()
+            # Compute the median resale price for each town within the last 3 months
+            median_prices = affordable_houses.groupby("town").agg(
+                median_resale_price=("resale_price", "median")
+            ).reset_index()
+
+            # Merge median prices with the original affordable_houses data to get additional details
+            affordable_houses = affordable_houses.merge(median_prices, on="town", how="inner")
+
+            # Keep only one representative row per town, where the resale price is closest to the median
+            affordable_houses["price_diff"] = (affordable_houses["resale_price"] - affordable_houses["median_resale_price"]).abs()
+            best_houses = affordable_houses.sort_values(by=["town", "price_diff"]).groupby("town").first().reset_index()
 
             # Select relevant columns to display
-            columns_to_display = ["town", "month", "block", "street_name", "flat_type", "storey_range", "floor_area_sqm", "resale_price", "remaining_lease"]
-            best_houses_display = best_houses[columns_to_display]
+            columns_to_display = ["town", "month", "block", "street_name", "flat_type", "storey_range", "floor_area_sqm", "median_resale_price", "remaining_lease"]
+            best_houses_display = best_houses[columns_to_display].rename(columns={"median_resale_price": "Median Resale Price (SGD)"})
+
+            # Sort towns alphabetically for better readability
+            best_houses_display = best_houses_display.sort_values(by="town")
 
             # Expand the DataFrame display
             st.dataframe(best_houses_display, use_container_width=True)
+
         else:
             st.warning("Please calculate affordability to see the best houses you can buy in each town (last 3 months).")
 
@@ -353,7 +364,7 @@ try:
         st.warning("Please fill in the required inputs to calculate affordability.")
 
     # Display Filtered Data
-    st.header("Filtered Data")
+    st.header("All houses filtered based on left sidebar")
     st.dataframe(filtered_data, use_container_width=True)
 except Exception as e:
     st.warning(e)
